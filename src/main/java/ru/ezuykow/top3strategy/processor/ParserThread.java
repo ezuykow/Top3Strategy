@@ -170,7 +170,7 @@ public class ParserThread extends Thread{
     }
 
     private void checkGames() {
-        if (games.size() > 3) {
+        if (games.size() > 2) {
             Game lastGame = games.get(games.size() - 1);
             int[] lastGameNums = lastGame.numbers;
             int[] secondGameNums = games.get(games.size() - 2).numbers;
