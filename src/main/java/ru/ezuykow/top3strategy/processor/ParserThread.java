@@ -19,7 +19,8 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.LinkedList;
+import java.util.List;
 
 /**
  * @author ezuykow
@@ -28,10 +29,12 @@ import java.util.*;
 public class ParserThread extends Thread{
 
     private static final String ARCHIVE_URL = "https://www.stoloto.ru/top3/archive";
-    private static final String LAST_ELEM_XPATH = "/html/body/div[1]/div[1]/div[6]/div[2]/div[2]/div[2]/div";
-    private static final String GAME_TIME_XPATH = "/html/body/div[1]/div[1]/div[6]/div[2]/div[2]/div[2]/div/div[1]";
-    private static final String GAME_NUMBER_XPATH = "/html/body/div[1]/div[1]/div[6]/div[2]/div[2]/div[2]/div/div[2]/a";
-    private static final String NUMBERS_SPAN_XPATH = "/html/body/div[1]/div[1]/div[6]/div[2]/div[2]/div[2]/div/div[3]/div[1]/div[1]/span";
+    private static final String FIRST_ELEM_XPATH = "/html/body/div[1]/div[1]/div[6]/div[2]/div[2]/div[2]/div";
+    private static final String SECOND_ELEM_XPATH = "/html/body/div[1]/div[1]/div[6]/div[2]/div[2]/div[3]/div";
+    private static final String THIRD_ELEM_XPATH = "/html/body/div[1]/div[1]/div[6]/div[2]/div[2]/div[4]/div";
+    private static final String GAME_TIME_XPATH_POSTFIX = "/div[1]";
+    private static final String GAME_NUMBER_XPATH_POSTFIX = "/div[2]/a";
+    private static final String NUMBERS_SPAN_XPATH_POSTFIX = "/div[3]/div[1]/div[1]/span";
     private static final int MAX_GAMES_IN_MEMORY = 5;
     private static final int BANK_DIFFER = 331;
     private static final int WAITING_STEP_MINUTES = 18;
@@ -57,9 +60,11 @@ public class ParserThread extends Thread{
     private final MessageSender msgSender;
     private final StatisticsService statisticsService;
 
+    private HtmlPage page;
     private final List<Game> games = new LinkedList<>();
     private final List<Bet> bets = new LinkedList<>();
     private boolean newGameAdded;
+    private boolean isStartUp = true;
 
     public ParserThread(MessageSender msgSender, StatisticsService statisticsService) {
         this.msgSender = msgSender;
@@ -75,20 +80,10 @@ public class ParserThread extends Thread{
 
         while (true) {
             try {
-                parsePage(webClient.getPage(ARCHIVE_URL));
-
-                if (newGameAdded) {
-                    trimList();
-                    checkBets(statisticsService);
-                    checkGames();
-                    sendNewBets();
-                    long waitingTime = calcWaitingTime();
-                    log.info("Sleep " + waitingTime/60_000 + " mins");
-                    sleep(waitingTime);
-                } else {
-                    log.info("Sleep 5 mins");
-                    sleep(5 * 60_000);
-                }
+                page = webClient.getPage(ARCHIVE_URL);
+                fillGamesIfStartUp();
+                parseElem(FIRST_ELEM_XPATH);
+                checkNewGameAdding();
             } catch (IOException e) {
                 throw new RuntimeException(e);
             } catch (InterruptedException e) {
@@ -107,38 +102,48 @@ public class ParserThread extends Thread{
         client.setCssErrorHandler(new SilentCssErrorHandler());
         client.getOptions().setJavaScriptEnabled(false);
         client.getOptions().setDownloadImages(false);
-        client.getOptions().setAppletEnabled(false);
         return client;
     }
 
-    private void parsePage(HtmlPage page) throws InterruptedException {
-        HtmlDivision elemDiv = page.getFirstByXPath(LAST_ELEM_XPATH);
+    private void fillGamesIfStartUp() throws InterruptedException {
+        if (isStartUp) {
+            parseElem(THIRD_ELEM_XPATH);
+            parseElem(SECOND_ELEM_XPATH);
+            isStartUp = false;
+        }
+    }
 
-        int gameNumber = parseGameNumber(elemDiv);
+    private void parseElem(String elemXPath) throws InterruptedException {
+        HtmlDivision elemDiv = page.getFirstByXPath(elemXPath);
+
+        int gameNumber = parseGameNumber(elemXPath, elemDiv);
 
         if (games.isEmpty() || games.get(games.size() - 1).gameNumber != gameNumber) {
-            int[] numbers = parseNumbers(elemDiv);
-            LocalDateTime dateTime = parseDateTimeText(elemDiv);
-            games.add(new Game(gameNumber, numbers, dateTime));
+            Game newGame = new Game(
+                    gameNumber,
+                    parseNumbers(elemXPath, elemDiv),
+                    parseDateTimeText(elemXPath, elemDiv)
+            );
+            games.add(newGame);
             newGameAdded = true;
-            log.info("New game parsed");
+            log.info("New game parsed: " + newGame);
         } else {
-            log.info("Repeated game");
+            log.info("Repeated game " + gameNumber);
             newGameAdded = false;
         }
     }
 
-    private int parseGameNumber(HtmlDivision elemDiv) {
-        HtmlAnchor anchor = elemDiv.getFirstByXPath(GAME_NUMBER_XPATH);
+    private int parseGameNumber(String elemXPath, HtmlDivision elemDiv) {
+        HtmlAnchor anchor = elemDiv.getFirstByXPath(elemXPath + GAME_NUMBER_XPATH_POSTFIX);
         return Integer.parseInt(anchor.getVisibleText());
     }
 
-    private int[] parseNumbers(HtmlDivision elemDiv) throws InterruptedException {
+    private int[] parseNumbers(String elemXPath, HtmlDivision elemDiv) throws InterruptedException {
         boolean dataUploading = true;
         int[] numbers = new int[3];
 
         while (dataUploading) {
-            HtmlSpan span = elemDiv.getFirstByXPath(NUMBERS_SPAN_XPATH);
+            HtmlSpan span = elemDiv.getFirstByXPath(elemXPath + NUMBERS_SPAN_XPATH_POSTFIX);
             if (span == null) {
                 sleep(60_000);
             } else {
@@ -152,8 +157,8 @@ public class ParserThread extends Thread{
         return numbers;
     }
 
-    private LocalDateTime parseDateTimeText(HtmlDivision elemDiv) {
-        HtmlDivision div = elemDiv.getFirstByXPath(GAME_TIME_XPATH);
+    private LocalDateTime parseDateTimeText(String elemXPath, HtmlDivision elemDiv) {
+        HtmlDivision div = elemDiv.getFirstByXPath(elemXPath + GAME_TIME_XPATH_POSTFIX);
         return LocalDateTime.parse(div.getVisibleText(), DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm:ss"));
     }
 
@@ -206,7 +211,7 @@ public class ParserThread extends Thread{
                 }
             }
 
-            Statistics stats = statisticsService.findAll().get(0);
+            Statistics stats = statisticsService.getStatistics();
             stats.setBetsCount(stats.getBetsCount() + 1);
             if (loose) {
                 stats.setLooses(stats.getLooses() + 1);
@@ -218,6 +223,7 @@ public class ParserThread extends Thread{
             log.info("Statistics refreshed");
         }
 
+        msgSender.sendStats();
         bets.clear();
     }
 
@@ -234,5 +240,28 @@ public class ParserThread extends Thread{
         LocalDateTime targetDateTime = lastGameTime.plusMinutes(WAITING_STEP_MINUTES);
         Duration dur = Duration.between(LocalDateTime.now(), targetDateTime);
         return Math.abs(dur.toMillis());
+    }
+
+    private void checkNewGameAdding() throws InterruptedException {
+        if (newGameAdded) {
+            performNewGameAddedActions();
+        } else {
+            performNewGameNotAddedActions();
+        }
+    }
+
+    private void performNewGameAddedActions() throws InterruptedException {
+        trimList();
+        checkBets(statisticsService);
+        checkGames();
+        sendNewBets();
+        long waitingTime = calcWaitingTime();
+        log.info("Sleep " + waitingTime/60_000 + " mins");
+        sleep(waitingTime);
+    }
+
+    private void performNewGameNotAddedActions() throws InterruptedException {
+        log.info("Sleep 5 mins");
+        sleep(5 * 60_000);
     }
 }

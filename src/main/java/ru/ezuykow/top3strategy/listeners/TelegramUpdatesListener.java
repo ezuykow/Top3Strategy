@@ -49,6 +49,10 @@ public class TelegramUpdatesListener implements UpdatesListener {
                     msgSender.delete(update.message().messageId());
                     processor.stopProcessor();
                 }
+                case "/stat" -> {
+                    msgSender.delete(update.message().messageId());
+                    msgSender.sendStats();
+                }
             }
         }
     }
