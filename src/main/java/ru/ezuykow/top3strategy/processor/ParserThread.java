@@ -223,8 +223,10 @@ public class ParserThread extends Thread{
             log.info("Statistics refreshed");
         }
 
-        msgSender.sendStats();
-        bets.clear();
+        if (!bets.isEmpty()) {
+            msgSender.sendStats();
+            bets.clear();
+        }
     }
 
     private void sendNewBets() {
