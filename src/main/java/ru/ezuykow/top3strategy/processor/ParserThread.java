@@ -7,6 +7,7 @@ import com.gargoylesoftware.htmlunit.html.HtmlAnchor;
 import com.gargoylesoftware.htmlunit.html.HtmlDivision;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
 import com.gargoylesoftware.htmlunit.html.HtmlSpan;
+import com.gargoylesoftware.htmlunit.javascript.SilentJavaScriptErrorListener;
 import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.ToString;
@@ -16,7 +17,6 @@ import ru.ezuykow.top3strategy.messages.MessageSender;
 import ru.ezuykow.top3strategy.services.StatisticsService;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -34,9 +34,10 @@ public class ParserThread extends Thread{
     private static final String GAME_TIME_XPATH_POSTFIX = "/div[1]";
     private static final String GAME_NUMBER_XPATH_POSTFIX = "/div[2]/a";
     private static final String NUMBERS_SPAN_XPATH_POSTFIX = "/div[3]/div[1]/div[1]/span";
+    public static final String TIMER_SPAN_XPATH = "/html/body/div[1]/div[1]/div[8]/div[5]/div[3]/div/div[19]/div[4]/div/span";
     private static final int MAX_GAMES_IN_MEMORY = 10;
     private static final int BANK_DIFFER = 331;
-    private static final int WAITING_STEP_MINUTES = 18;
+    private static final int WAITING_STEP_MINUTES_SPLIT = 3;
 
     @AllArgsConstructor
     @ToString
@@ -57,6 +58,7 @@ public class ParserThread extends Thread{
     private final Map<Integer, Integer> digitsInRow = new HashMap<>();
     private boolean newGameAdded;
     private boolean isStartUp = true;
+    private long waitingTimeMillis;
 
     public ParserThread(MessageSender msgSender, StatisticsService statisticsService) {
         this.msgSender = msgSender;
@@ -73,6 +75,8 @@ public class ParserThread extends Thread{
         while (true) {
             try {
                 page = webClient.getPage(ARCHIVE_URL);
+                webClient.waitForBackgroundJavaScript(20_000);
+
                 fillGamesIfStartUp();
                 parseElem(FIRST_ELEM_XPATH);
                 checkNewGameAdding();
@@ -93,8 +97,12 @@ public class ParserThread extends Thread{
     private WebClient createWebClient() {
         WebClient client = new WebClient(BrowserVersion.FIREFOX);
         client.setCssErrorHandler(new SilentCssErrorHandler());
-        client.getOptions().setJavaScriptEnabled(false);
         client.getOptions().setDownloadImages(false);
+        client.getOptions().setCssEnabled(false);
+        client.getOptions().setThrowExceptionOnScriptError(false);
+        client.getOptions().setThrowExceptionOnFailingStatusCode(false);
+        client.setJavaScriptErrorListener(new SilentJavaScriptErrorListener());
+        client.getOptions().setJavaScriptEnabled(true);
         return client;
     }
 
@@ -207,18 +215,24 @@ public class ParserThread extends Thread{
 
         for (Map.Entry<Integer, Integer> e : digitsInRow.entrySet()) {
             switch (e.getValue()) {
-                case 3 -> msgSender.send("Digit " + e.getKey() + " dropped 3 times in a row. Bet 1 x nominal to game " + (lastGame.gameNumber + 1));
-                case 4 -> msgSender.send("Digit " + e.getKey() + " dropped 4 times in a row. Bet 3 x nominal to game " + (lastGame.gameNumber + 1));
+                case 3 -> msgSender.send("Digit " + e.getKey() + " dropped 3 times in a row. Bet 1 x nominal to game "
+                        + (lastGame.gameNumber + 1) + " in " + waitingTimeMillis/60_000 + " minutes");
+                case 4 -> msgSender.send("Digit " + e.getKey() + " dropped 4 times in a row. Bet 3 x nominal to game "
+                        + (lastGame.gameNumber + 1) + " in " + waitingTimeMillis/60_000 + " minutes");
                 case 5 -> msgSender.send("Digit " + e.getKey() + " dropped 5 times in a row. DONT TOUCH THIS EVIL DIGIT");
             }
         }
     }
 
-    private long calcWaitingTime() {
-        LocalDateTime lastGameTime = games.get(games.size() - 1).dateTime;
-        LocalDateTime targetDateTime = lastGameTime.plusMinutes(WAITING_STEP_MINUTES);
-        Duration dur = Duration.between(LocalDateTime.now(), targetDateTime);
-        return Math.abs(dur.toMillis());
+    private void calcWaitingTime() {
+        HtmlSpan timeToNextGameSpan = page.getFirstByXPath(TIMER_SPAN_XPATH);
+        String timeToNextGameText = timeToNextGameSpan.asNormalizedText();
+        if (timeToNextGameText.contains("--")) {
+            waitingTimeMillis = 60_000;
+        } else {
+            int minutesToNextGame = Integer.parseInt(timeToNextGameText.substring(0, timeToNextGameText.indexOf(":")));
+            waitingTimeMillis = minutesToNextGame * 60_000L;
+        }
     }
 
     private void checkNewGameAdding() throws InterruptedException {
@@ -232,9 +246,9 @@ public class ParserThread extends Thread{
     private void performNewGameAddedActions() throws InterruptedException {
         trimList();
         checkNewGameDigits();
-        long waitingTime = calcWaitingTime();
-        log.info("Sleep " + waitingTime/60_000 + " mins");
-        sleep(waitingTime);
+        calcWaitingTime();
+        log.info("Sleep " + (waitingTimeMillis + WAITING_STEP_MINUTES_SPLIT)/60_000 + " mins");
+        sleep(waitingTimeMillis + WAITING_STEP_MINUTES_SPLIT * 60_000);
     }
 
     private void performNewGameNotAddedActions() throws InterruptedException {
