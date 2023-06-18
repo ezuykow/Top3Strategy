@@ -19,8 +19,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 
 /**
  * @author ezuykow
@@ -35,7 +34,7 @@ public class ParserThread extends Thread{
     private static final String GAME_TIME_XPATH_POSTFIX = "/div[1]";
     private static final String GAME_NUMBER_XPATH_POSTFIX = "/div[2]/a";
     private static final String NUMBERS_SPAN_XPATH_POSTFIX = "/div[3]/div[1]/div[1]/span";
-    private static final int MAX_GAMES_IN_MEMORY = 5;
+    private static final int MAX_GAMES_IN_MEMORY = 10;
     private static final int BANK_DIFFER = 331;
     private static final int WAITING_STEP_MINUTES = 18;
 
@@ -46,15 +45,8 @@ public class ParserThread extends Thread{
 
         @EqualsAndHashCode.Include
         int gameNumber;
-        int[] numbers;
+        Integer[] numbers;
         LocalDateTime dateTime;
-    }
-
-    @AllArgsConstructor
-    private static class Bet {
-
-        int targetGameNumber;
-        int targetNum;
     }
 
     private final MessageSender msgSender;
@@ -62,7 +54,7 @@ public class ParserThread extends Thread{
 
     private HtmlPage page;
     private final List<Game> games = new LinkedList<>();
-    private final List<Bet> bets = new LinkedList<>();
+    private final Map<Integer, Integer> digitsInRow = new HashMap<>();
     private boolean newGameAdded;
     private boolean isStartUp = true;
 
@@ -85,6 +77,7 @@ public class ParserThread extends Thread{
                 parseElem(FIRST_ELEM_XPATH);
                 checkNewGameAdding();
             } catch (IOException e) {
+                webClient.close();
                 throw new RuntimeException(e);
             } catch (InterruptedException e) {
                 break;
@@ -108,7 +101,9 @@ public class ParserThread extends Thread{
     private void fillGamesIfStartUp() throws InterruptedException {
         if (isStartUp) {
             parseElem(THIRD_ELEM_XPATH);
+            checkNewGameDigits();
             parseElem(SECOND_ELEM_XPATH);
+            checkNewGameDigits();
             isStartUp = false;
         }
     }
@@ -138,9 +133,9 @@ public class ParserThread extends Thread{
         return Integer.parseInt(anchor.getVisibleText());
     }
 
-    private int[] parseNumbers(String elemXPath, HtmlDivision elemDiv) throws InterruptedException {
+    private Integer[] parseNumbers(String elemXPath, HtmlDivision elemDiv) throws InterruptedException {
         boolean dataUploading = true;
-        int[] numbers = new int[3];
+        Integer[] numbers = new Integer[3];
 
         while (dataUploading) {
             HtmlSpan span = elemDiv.getFirstByXPath(elemXPath + NUMBERS_SPAN_XPATH_POSTFIX);
@@ -165,75 +160,57 @@ public class ParserThread extends Thread{
     private void trimList() {
         if (games.size() > MAX_GAMES_IN_MEMORY) {
             games.remove(0);
-            log.info("Removed 0 element from games");
+            log.info("Removed far element from games");
         }
     }
 
-    private void checkGames() {
-        if (games.size() > 2) {
-            Game lastGame = games.get(games.size() - 1);
-            int[] lastGameNums = lastGame.numbers;
-            int[] secondGameNums = games.get(games.size() - 2).numbers;
-            int[] thirdGameNums = games.get(games.size() - 3).numbers;
+    private void checkNewGameDigits() {
+        Game lastGame = games.get(games.size() - 1);
+        Set<Integer> lastGameUniqueNums = new HashSet<>(List.of(lastGame.numbers));
+        log.info("Checking digits " + lastGameUniqueNums);
 
-            for (int lastGameNum : lastGameNums) {
-                boolean repeat2 = false;
-                for (int secondGameNum : secondGameNums) {
-                    if (secondGameNum == lastGameNum) {
-                        repeat2 = true;
-                        break;
-                    }
-                }
-                boolean repeat3 = false;
-                for (int thirdGameNum : thirdGameNums) {
-                    if (thirdGameNum == lastGameNum) {
-                        repeat3 = true;
-                        break;
-                    }
-                }
-                if (repeat2 && repeat3) {
-                    bets.add(new Bet(lastGame.gameNumber + 1, lastGameNum));
-                    log.info("New bet added");
-                }
-            }
-        }
-    }
-
-    private void checkBets(StatisticsService statisticsService) {
-        Game newGame = games.get(games.size() - 1);
-
-        for (Bet bet : bets) {
-            boolean loose = false;
-            for (int number : newGame.numbers) {
-                if (number == bet.targetNum) {
-                    loose = true;
-                    break;
-                }
-            }
-
-            Statistics stats = statisticsService.getStatistics();
-            stats.setBetsCount(stats.getBetsCount() + 1);
-            if (loose) {
-                stats.setLooses(stats.getLooses() + 1);
-                stats.setBankStatus(stats.getBankStatus() - 1000);
+        for (Integer digit : lastGameUniqueNums) {
+            if (digitsInRow.containsKey(digit)) {
+                digitsInRow.put(digit, digitsInRow.get(digit) + 1);
             } else {
-                stats.setBankStatus(stats.getBankStatus() + BANK_DIFFER);
+                digitsInRow.put(digit, 1);
             }
-            statisticsService.save(stats);
-            log.info("Statistics refreshed");
         }
 
-        if (!bets.isEmpty()) {
-            msgSender.sendStats();
-            bets.clear();
-        }
-    }
+        List<Integer> digitsToDelete = new ArrayList<>();
+        for (Map.Entry<Integer, Integer> d : digitsInRow.entrySet()) {
+            if (!lastGameUniqueNums.contains(d.getKey())) {
+                if (d.getValue() > 2) {
+                    Statistics stats = statisticsService.getStatistics();
+                    stats.setBetsCount(stats.getBetsCount() + 1);
 
-    private void sendNewBets() {
-        for (Bet bet : bets) {
-            msgSender.send("В тираже " + bet.targetGameNumber + " не выпадет цифра " + bet.targetNum +
-                    ", кф 1." + BANK_DIFFER);
-            log.info("New bet sent");
+                    switch (d.getValue()) {
+                        case 3 -> stats.setBankStatus(stats.getBankStatus() + BANK_DIFFER);
+                        case 4 -> {
+                            stats.setLooses(stats.getLooses() + 1);
+                            stats.setBankStatus(stats.getBankStatus() - 1000 + 3 * BANK_DIFFER);
+                        }
+                        default -> {
+                            stats.setLooses(stats.getLooses() + 1);
+                            stats.setBankStatus(stats.getBankStatus() - 3000);
+                        }
+                    }
+                    statisticsService.save(stats);
+                    msgSender.sendStats();
+                }
+                digitsToDelete.add(d.getKey());
+            }
+        }
+        for (Integer i : digitsToDelete) {
+            digitsInRow.remove(i);
+        }
+
+        for (Map.Entry<Integer, Integer> e : digitsInRow.entrySet()) {
+            switch (e.getValue()) {
+                case 3 -> msgSender.send("Digit " + e.getKey() + " dropped 3 times in a row. Bet 1 x nominal");
+                case 4 -> msgSender.send("Digit " + e.getKey() + " dropped 4 times in a row. Bet 3 x nominal");
+                case 5 -> msgSender.send("Digit " + e.getKey() + " dropped 5 times in a row. DONT TOUCH THIS EVIL DIGIT");
+            }
         }
     }
 
@@ -254,9 +231,7 @@ public class ParserThread extends Thread{
 
     private void performNewGameAddedActions() throws InterruptedException {
         trimList();
-        checkBets(statisticsService);
-        checkGames();
-        sendNewBets();
+        checkNewGameDigits();
         long waitingTime = calcWaitingTime();
         log.info("Sleep " + waitingTime/60_000 + " mins");
         sleep(waitingTime);

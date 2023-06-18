@@ -24,7 +24,6 @@ public class Processor {
         if (!isStarted) {
             parserThread = new ParserThread(msgSender, statisticsService);
             parserThread.start();
-            msgSender.send("Parser started");
             isStarted = true;
         }
     }
@@ -32,7 +31,6 @@ public class Processor {
     public void stopProcessor() {
         if (isStarted) {
             parserThread.interrupt();
-            msgSender.send("Parser stopped");
         }
     }
 
