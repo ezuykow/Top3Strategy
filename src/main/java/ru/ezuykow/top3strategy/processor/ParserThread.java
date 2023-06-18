@@ -207,8 +207,8 @@ public class ParserThread extends Thread{
 
         for (Map.Entry<Integer, Integer> e : digitsInRow.entrySet()) {
             switch (e.getValue()) {
-                case 3 -> msgSender.send("Digit " + e.getKey() + " dropped 3 times in a row. Bet 1 x nominal");
-                case 4 -> msgSender.send("Digit " + e.getKey() + " dropped 4 times in a row. Bet 3 x nominal");
+                case 3 -> msgSender.send("Digit " + e.getKey() + " dropped 3 times in a row. Bet 1 x nominal to game " + lastGame.gameNumber);
+                case 4 -> msgSender.send("Digit " + e.getKey() + " dropped 4 times in a row. Bet 3 x nominal to game " + lastGame.gameNumber);
                 case 5 -> msgSender.send("Digit " + e.getKey() + " dropped 5 times in a row. DONT TOUCH THIS EVIL DIGIT");
             }
         }
