@@ -6,7 +6,6 @@ import com.pengrad.telegrambot.model.Update;
 import jakarta.annotation.PostConstruct;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
-import ru.ezuykow.top3strategy.analyse.Analyser;
 import ru.ezuykow.top3strategy.messages.MessageSender;
 import ru.ezuykow.top3strategy.processor.Processor;
 
@@ -53,10 +52,6 @@ public class TelegramUpdatesListener implements UpdatesListener {
                 case "/stat" -> {
                     msgSender.delete(update.message().messageId());
                     msgSender.sendStats();
-                }
-                case "/analyse" -> {
-                    msgSender.delete(update.message().messageId());
-                    msgSender.send(Analyser.performAnalyse());
                 }
             }
         }
