@@ -37,7 +37,7 @@ public class ParserThread extends Thread{
     public static final String TIMER_SPAN_XPATH = "/html/body/div[1]/div[1]/div[8]/div[5]/div[3]/div/div[19]/div[4]/div/span";
     private static final int MAX_GAMES_IN_MEMORY = 10;
     private static final int BANK_DIFFER = 331;
-    private static final int WAITING_STEP_MINUTES_SPLIT = 3;
+    private static final int WAITING_STEP_MINUTES_SHIFT = 3;
 
     @AllArgsConstructor
     @ToString
@@ -247,8 +247,8 @@ public class ParserThread extends Thread{
         trimList();
         checkNewGameDigits();
         calcWaitingTime();
-        log.info("Sleep " + (waitingTimeMillis + WAITING_STEP_MINUTES_SPLIT)/60_000 + " mins");
-        sleep(waitingTimeMillis + WAITING_STEP_MINUTES_SPLIT * 60_000);
+        log.info("Sleep " + (waitingTimeMillis/60_000 + WAITING_STEP_MINUTES_SHIFT) + " mins");
+        sleep(waitingTimeMillis + WAITING_STEP_MINUTES_SHIFT * 60_000);
     }
 
     private void performNewGameNotAddedActions() throws InterruptedException {
