@@ -57,6 +57,7 @@ public class ParserThread extends Thread{
     private final List<Game> games = new LinkedList<>();
     private final Map<Integer, Integer> digitsInRow = new HashMap<>();
     private boolean newGameAdded;
+    private boolean numbersParsed;
     private boolean isStartUp = true;
     private long waitingTimeMillis;
 
@@ -128,7 +129,7 @@ public class ParserThread extends Thread{
                     parseDateTimeText(elemXPath, elemDiv)
             );
             games.add(newGame);
-            newGameAdded = true;
+            newGameAdded = numbersParsed;
             log.info("New game parsed: " + newGame);
         } else {
             log.info("Repeated game " + gameNumber);
@@ -141,20 +142,21 @@ public class ParserThread extends Thread{
         return Integer.parseInt(anchor.getVisibleText());
     }
 
-    private Integer[] parseNumbers(String elemXPath, HtmlDivision elemDiv) throws InterruptedException {
+    private Integer[] parseNumbers(String elemXPath, HtmlDivision elemDiv) {
         boolean dataUploading = true;
         Integer[] numbers = new Integer[3];
 
         while (dataUploading) {
             HtmlSpan span = elemDiv.getFirstByXPath(elemXPath + NUMBERS_SPAN_XPATH_POSTFIX);
             if (span == null) {
-                sleep(60_000);
+                numbersParsed = false;
             } else {
                 dataUploading = false;
                 String text = span.asNormalizedText();
                 numbers[0] = Integer.parseInt(text.substring(0, 1));
                 numbers[1] = Integer.parseInt(text.substring(2, 3));
                 numbers[2] = Integer.parseInt(text.substring(4, 5));
+                numbersParsed = true;
             }
         }
         return numbers;
@@ -252,7 +254,7 @@ public class ParserThread extends Thread{
     }
 
     private void performNewGameNotAddedActions() throws InterruptedException {
-        log.info("Sleep 5 mins");
-        sleep(5 * 60_000);
+        log.info("Sleep 1 mins");
+        sleep(60_000);
     }
 }
