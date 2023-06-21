@@ -122,18 +122,20 @@ public class ParserThread extends Thread{
 
         int gameNumber = parseGameNumber(elemXPath, elemDiv);
 
+        newGameAdded = false;
         if (games.isEmpty() || games.get(games.size() - 1).gameNumber != gameNumber) {
             Game newGame = new Game(
                     gameNumber,
                     parseNumbers(elemXPath, elemDiv),
                     parseDateTimeText(elemXPath, elemDiv)
             );
-            games.add(newGame);
-            newGameAdded = numbersParsed;
-            log.info("New game parsed: " + newGame);
+            if (numbersParsed) {
+                games.add(newGame);
+                newGameAdded = true;
+                log.info("New game parsed: " + newGame);
+            }
         } else {
             log.info("Repeated game " + gameNumber);
-            newGameAdded = false;
         }
     }
 
@@ -143,22 +145,19 @@ public class ParserThread extends Thread{
     }
 
     private Integer[] parseNumbers(String elemXPath, HtmlDivision elemDiv) {
-        boolean dataUploading = true;
         Integer[] numbers = new Integer[3];
 
-        while (dataUploading) {
-            HtmlSpan span = elemDiv.getFirstByXPath(elemXPath + NUMBERS_SPAN_XPATH_POSTFIX);
-            if (span == null) {
-                numbersParsed = false;
-            } else {
-                dataUploading = false;
-                String text = span.asNormalizedText();
-                numbers[0] = Integer.parseInt(text.substring(0, 1));
-                numbers[1] = Integer.parseInt(text.substring(2, 3));
-                numbers[2] = Integer.parseInt(text.substring(4, 5));
-                numbersParsed = true;
-            }
+        HtmlSpan span = elemDiv.getFirstByXPath(elemXPath + NUMBERS_SPAN_XPATH_POSTFIX);
+        if (span == null) {
+            numbersParsed = false;
+        } else {
+            String text = span.asNormalizedText();
+            numbers[0] = Integer.parseInt(text.substring(0, 1));
+            numbers[1] = Integer.parseInt(text.substring(2, 3));
+            numbers[2] = Integer.parseInt(text.substring(4, 5));
+            numbersParsed = true;
         }
+
         return numbers;
     }
 
@@ -247,8 +246,8 @@ public class ParserThread extends Thread{
 
     private void performNewGameAddedActions() throws InterruptedException {
         trimList();
-        checkNewGameDigits();
         calcWaitingTime();
+        checkNewGameDigits();
         log.info("Sleep " + (waitingTimeMillis/60_000 + WAITING_STEP_MINUTES_SHIFT) + " mins");
         sleep(waitingTimeMillis + WAITING_STEP_MINUTES_SHIFT * 60_000);
     }
